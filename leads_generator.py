@@ -120,7 +120,7 @@ class LeadGenerationOrchestrator:
             
             # --- THIS IS THE REVISED LINE ---
             # Changed 'gemini-pro' to 'gemini-1.5-flash-latest' to align with modern, available models.
-            model = genai.GenerativeModel('gemini-1.5-flash-latest')
+            model = genai.GenerativeModel('gemini-2.5-flash')
             
             for attempt in range(max_retries_per_key):
                 try:
