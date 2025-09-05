@@ -1,5 +1,5 @@
 # File: leads_generator.py
-# --- REVISED WITH ALL CORRECTIONS AND MODEL UPDATE ---
+# --- REVISED WITH REGENERATIVE FAILURE LOOP, NEW CSV FORMAT, AND ENHANCED PROMPTS ---
 
 import os
 import time
@@ -70,15 +70,18 @@ class CSVDataManager:
         self._initialize_csv()
 
     def _initialize_csv(self):
-        """Initializes the CSV with the new headers if it doesn't exist."""
+        """Initializes the CSV with the correct headers if it doesn't exist."""
         with self.csv_lock:
-            if not self.output_file.exists():
-                with open(self.output_file, 'w', newline='', encoding='utf-8') as f:
-                    writer = csv.writer(f)
-                    writer.writerow([
-                        'CompanyName', 'Status', 'ContactName', 'ContactTitle', 'Email', 'PhoneNumber',
-                        'AlternativeEmail', 'AlternativePhoneNumber', 'LinkedIn', 'Timestamp'
-                    ])
+            if self.output_file.exists():
+                return
+            with open(self.output_file, 'w', newline='', encoding='utf-8') as f:
+                writer = csv.writer(f)
+                # --- FIX: Revised headers as requested ---
+                writer.writerow([
+                    'CompanyName', 'ContactName', 'ContactTitle', 'Email', 'PhoneNumber',
+                    'AlternativeContactName', 'AlternativeContactTitle', 'AlternativeEmail', 'AlternativePhoneNumber',
+                    'Timestamp'
+                ])
 
     def get_existing_company_names(self):
         with self.csv_lock:
@@ -92,44 +95,41 @@ class CSVDataManager:
                 return set()
 
     def write_lead_data(self, company_name, lead_data):
-        """Writes a single lead to the CSV, mapping the new data structure."""
+        """Writes a single successful lead to the CSV."""
         timestamp = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')
-        status = lead_data.get('status', 'Failed')
         get = lambda key: lead_data.get(key) or ""
 
         with self.csv_lock:
             try:
                 with open(self.output_file, 'a', newline='', encoding='utf-8') as f:
                     writer = csv.writer(f)
+                    # --- FIX: Writing data in the new column order ---
                     writer.writerow([
-                        company_name, status, get('contact_name'), get('contact_title'), get('email'),
-                        get('phone_number'), get('alternative_email'), get('alternative_phone_number'),
-                        get('linkedin_url'), timestamp
+                        company_name, get('contact_name'), get('contact_title'), get('email'), get('phone_number'),
+                        get('alt_contact_name'), get('alt_contact_title'), get('alt_email'), get('alt_phone_number'),
+                        timestamp
                     ])
             except Exception as e:
                 logging.error(f"Failed to write to CSV for '{company_name}': {e}")
 
 
 class LeadGenerationOrchestrator:
-    """Manages the entire lead generation process with advanced prompting and parsing."""
+    """Manages the entire lead generation process with a regenerative failure loop."""
     def __init__(self, config, args):
         self.key_manager = GeminiAPIKeyManager(config.gemini_api_keys)
         self.data_manager = CSVDataManager()
         self.args = args
 
     def _call_gemini_api(self, prompt):
-        """Calls Gemini API with increased retries and the Google Search tool."""
+        """Calls Gemini API with retries and the Google Search tool."""
         max_retries_per_key = 5
         while True:
             api_key = self.key_manager.get_key()
             if not api_key: return None, "All API keys are exhausted."
             genai.configure(api_key=api_key)
-            
-            # --- FIX: Using the requested 'flash' model while keeping search tool for high quality ---
             model = genai.GenerativeModel(
                 model_name='gemini-2.5-flash'
             )
-            
             for attempt in range(max_retries_per_key):
                 try:
                     response = model.generate_content(prompt)
@@ -145,146 +145,174 @@ class LeadGenerationOrchestrator:
                 return None, "All API keys exhausted after retries."
 
     def _parse_json_from_response(self, text):
-        """Robustly parses JSON from the AI's response, handling markdown fences."""
+        """Robustly parses JSON from the AI's response."""
         if not text:
             return None
         match = re.search(r'```(?:json)?\s*(\{[\s\S]*?\})\s*```', text)
         if match:
-            try:
-                return json.loads(match.group(1))
-            except json.JSONDecodeError:
-                logging.error("Failed to parse JSON from detected markdown block.")
-        try:
+            text_to_parse = match.group(1)
+        else:
             first_brace = text.find('{')
             last_brace = text.rfind('}')
             if first_brace != -1 and last_brace > first_brace:
-                return json.loads(text[first_brace:last_brace+1])
+                text_to_parse = text[first_brace:last_brace+1]
+            else:
+                return None
+        try:
+            return json.loads(text_to_parse)
         except json.JSONDecodeError:
-            logging.error(f"Failed to parse JSON from raw text fallback. Response: {text[:200]}")
+            logging.error(f"Failed to parse JSON. Response snippet: {text_to_parse[:200]}")
         return None
 
     def _generate_detailed_prompt(self, company_name):
-        """Creates a highly detailed, robust prompt focused on contact acquisition."""
+        """Creates an enhanced, robust prompt for finding multiple contacts."""
         return f"""
-        **MISSION:** You are an elite AI investigator. Your target is the company "{company_name}" in the region of "{self.args.location}". Your investigation must be thorough and swift.
+        **MISSION:** You are an elite AI investigator and data enrichment specialist. Your target is the company "{company_name}" within the "{self.args.sector}" sector in or near "{self.args.location}".
 
-        **PRIMARY OBJECTIVE (NON-NEGOTIABLE):** Your absolute highest priority is to acquire high-value contact points. Success is defined as finding AT LEAST ONE of the following:
-        1. A direct email address for a key decision-maker (e.g., firstname.lastname@company.com).
-        2. A direct mobile phone number for a key staff member.
-
-        If you cannot acquire at least one of these, the lead is considered INVALID. General "info@" emails or generic company hotlines are LOW-VALUE and should only be used as alternatives if direct contacts are found.
+        **PRIMARY OBJECTIVE (NON-NEGOTIABLE):** Your highest priority is to acquire direct contact information for key decision-makers. Success is defined as finding AT LEAST ONE direct email OR direct phone number.
 
         **EXECUTION PROTOCOL:**
-        1.  **VIABILITY:** Use Google Search to confirm "{company_name}" is operational. If it is permanently closed or un-findable, the lead is INVALID.
-        2.  **GATHER INTEL:** Find the following information:
-            *   `contactPerson`: name and title of a relevant decision-maker (e.g., Owner, Director, Head of Sales, Head of Marketing).
-            *   `contactEmail`: An array of strings. Prioritize direct emails. Include high-quality general emails (e.g., sales@) as secondary options.
-            *   `contactPhone`: An array of strings. Prioritize direct mobile numbers. Include high-quality company phone numbers as secondary options.
-            *   `linkedinUrl`: The LinkedIn URL of the contact person, if available.
-        3.  **EXCLUDE LOW-VALUE CONTACTS:** Ignore and do not include `jobs@`, `careers@`, `support@`, `help@`, etc., unless no other contacts can be found.
+        1.  **IDENTIFY CONTACTS:** Use Google Search to find up to two key decision-makers. Prioritize roles like C-Level (CEO, CTO), VP, Director, or Head of Department (Sales, Marketing, Operations).
+        2.  **GATHER INTEL FOR EACH CONTACT:** For each person you identify, find their `name`, `title`, direct `email`, and direct `phone` number.
+        3.  **EXCLUDE LOW-VALUE DATA:** Do NOT include generic emails (`info@`, `support@`, `jobs@`) or general company hotlines unless NO direct information can be found.
 
         **FINAL REPORTING & QUALITY CONTROL:**
-        1.  **COMPILE JSON:** Assemble all gathered data into the specified JSON structure. All fields must be present.
-        2.  **INVALIDATION RULE:** If the lead is INVALID (non-operational or fails the PRIMARY OBJECTIVE), your entire response MUST be ONLY: `{{ "status": "failed", "reason": "Could not find direct contact info." }}`.
-        3.  **OUTPUT FORMAT:** Your entire response MUST be a single, raw JSON object. Do not use markdown fences (```json).
+        1.  **INVALIDATION RULE:** If the company is not operational OR you fail the PRIMARY OBJECTIVE (cannot find a single direct email or phone number), your entire response MUST be ONLY: `{{ "status": "failed", "reason": "Could not find any direct contact information." }}`.
+        2.  **OUTPUT FORMAT:** Your entire response MUST be a single, raw JSON object. Do not use markdown.
 
         **JSON STRUCTURE EXAMPLE (SUCCESS):**
         {{
             "status": "success",
-            "contactPerson": {{ "name": "Budi Santoso", "title": "Marketing Director" }},
-            "contactDetails": {{
-                "emails": ["budi.s@examplecorp.com", "sales.surabaya@examplecorp.com"],
-                "phones": ["+6281234567890", "+62315551234"],
-                "linkedinUrl": "https://linkedin.com/in/budisantoso"
-            }}
+            "contacts": [
+                {{
+                    "name": "Budi Santoso",
+                    "title": "Marketing Director",
+                    "email": "budi.s@examplecorp.com",
+                    "phone": "+6281234567890"
+                }},
+                {{
+                    "name": "Ani Wijaya",
+                    "title": "Head of Sales",
+                    "email": "ani.wijaya@examplecorp.com",
+                    "phone": null
+                }}
+            ]
         }}
         """
 
     def _process_single_company(self, company_name):
-        """Processes one company, applying the new robust logic."""
+        """Processes one company. Returns True on success, False on failure."""
         prompt = self._generate_detailed_prompt(company_name)
         raw_response, error = self._call_gemini_api(prompt)
         
         if error:
-            lead_data = {'status': 'Failed', 'reason': f"API Error: {error}"}
-            self.data_manager.write_lead_data(company_name, lead_data)
-            return company_name
+            logging.error(f"API Error for '{company_name}': {error}")
+            return False
 
         parsed_json = self._parse_json_from_response(raw_response)
 
-        if not parsed_json or parsed_json.get('status') == 'failed':
+        if not parsed_json or parsed_json.get('status') == 'failed' or not parsed_json.get('contacts'):
             reason = parsed_json.get('reason', 'Invalid or failed response from AI.')
-            logging.warning(f"Lead for '{company_name}' marked as invalid. Reason: {reason}")
-            lead_data = {'status': 'Failed'}
-            self.data_manager.write_lead_data(company_name, lead_data)
-            return company_name
+            logging.warning(f"Lead for '{company_name}' failed. Reason: {reason}")
+            return False
 
-        contact_person = parsed_json.get('contactPerson', {})
-        contact_details = parsed_json.get('contactDetails', {})
-        emails = contact_details.get('emails', [])
-        phones = contact_details.get('phones', [])
+        contacts = parsed_json.get('contacts', [])
+        if not isinstance(contacts, list) or len(contacts) == 0:
+            logging.warning(f"Lead for '{company_name}' failed. Reason: No contacts found in the response.")
+            return False
 
-        # --- FIX: Correctly map list items to individual CSV columns ---
+        # Map the successful JSON response to our flat CSV structure
+        primary_contact = contacts[0]
+        secondary_contact = contacts[1] if len(contacts) > 1 else {}
+        
         lead_data = {
-            'status': 'Processed',
-            'contact_name': contact_person.get('name'),
-            'contact_title': contact_person.get('title'),
-            'email': emails if emails else None,
-            'alternative_email': emails if len(emails) > 1 else None,
-            'phone_number': phones if phones else None,
-            'alternative_phone_number': phones if len(phones) > 1 else None,
-            'linkedin_url': contact_details.get('linkedinUrl')
+            'contact_name': primary_contact.get('name'),
+            'contact_title': primary_contact.get('title'),
+            'email': primary_contact.get('email'),
+            'phone_number': primary_contact.get('phone'),
+            'alt_contact_name': secondary_contact.get('name'),
+            'alt_contact_title': secondary_contact.get('title'),
+            'alt_email': secondary_contact.get('email'),
+            'alt_phone_number': secondary_contact.get('phone'),
         }
         self.data_manager.write_lead_data(company_name, lead_data)
-        return company_name
+        return True
+
+    def _generate_company_candidates(self, count_needed, exclusion_list):
+        """Generates a list of new company candidates, avoiding exclusions."""
+        logging.info(f"Attempting to generate {count_needed} new company candidates...")
+        avoid_list_str = ", ".join(list(exclusion_list)[-200:])
+        
+        prompt = (
+            f"Act as a Market Research Analyst. Generate a list of {count_needed} high-quality company names "
+            f"in the '{self.args.sector}' sector, near '{self.args.location}'. "
+            "Provide output as a single line of comma-separated values.\n"
+            f"IMPORTANT: Do NOT include any of these company names: {avoid_list_str}"
+        )
+        
+        response_text, error = self._call_gemini_api(prompt)
+        if error:
+            logging.error(f"Could not generate company list: {error}")
+            return []
+        
+        batch_companies = {name.strip() for name in response_text.split(',') if name.strip()}
+        newly_found = list(batch_companies - exclusion_list)
+        logging.info(f"Generated {len(newly_found)} unique company candidates.")
+        return newly_found
 
     def run(self):
-        companies_to_process = self._generate_company_list_in_batches()
-        if not companies_to_process:
-            logging.warning("No new companies were generated to process.")
-            return
+        """Executes the regenerative lead generation workflow."""
+        target_lead_count = self.args.num_companies
+        successful_leads_count = 0
+        searched_companies = self.data_manager.get_existing_company_names()
+        max_attempts = 3 # Safety break to prevent infinite loops
+        current_attempt = 0
 
-        logging.info(f"Starting detailed lead generation for {len(companies_to_process)} new companies...")
-        with ThreadPoolExecutor(max_workers=self.args.workers, thread_name_prefix='LeadGen') as executor:
-            futures = [executor.submit(self._process_single_company, company) for company in companies_to_process]
-            for future in as_completed(futures):
-                try:
-                    logging.info(f"Completed processing for: {future.result()}")
-                except Exception as e:
-                    logging.error(f"A task generated an exception: {e}", exc_info=True)
-    
-    def _generate_company_list_in_batches(self):
-        logging.info("Phase 1: Generating company list in batches...")
-        all_new_companies = set()
-        num_batches = (self.args.num_companies + 9) // 10
-        for i in range(num_batches):
-            existing_companies = self.data_manager.get_existing_company_names().union(all_new_companies)
-            logging.info(f"Batch {i+1}/{num_batches}: Generating 10 new companies...")
-            avoid_list_str = ", ".join(list(existing_companies)[-200:])
-            prompt = (
-                f"Act as a Market Research Analyst. Your task is to generate a list of 10 high-quality company names "
-                f"that are strong potential leads in the '{self.args.sector}' sector, focusing on the '{self.args.location}' area. "
-                "Provide the output as a single line of comma-separated values (e.g., 'Company A, Company B, Company C').\n\n"
-                f"IMPORTANT: Do NOT include any of the following company names in your output:\n{avoid_list_str}"
-            )
-            response_text, error = self._call_gemini_api(prompt)
-            if error:
-                logging.error(f"Could not generate company list for batch {i+1}: {error}")
+        while successful_leads_count < target_lead_count and current_attempt < max_attempts:
+            needed_count = target_lead_count - successful_leads_count
+            logging.info(f"Goal: {target_lead_count} leads. Current: {successful_leads_count}. Need {needed_count} more.")
+
+            # Phase 1: Generate new, unique company candidates
+            companies_to_process = self._generate_company_candidates(needed_count, searched_companies)
+            
+            if not companies_to_process:
+                logging.warning("Could not generate any new company candidates in this attempt.")
+                current_attempt += 1
                 continue
-            batch_companies = {name.strip() for name in response_text.split(',') if name.strip()}
-            newly_found = batch_companies - existing_companies
-            all_new_companies.update(newly_found)
-            logging.info(f"Found {len(newly_found)} unique companies in this batch.")
-            time.sleep(2)
-        return list(all_new_companies)[:self.args.num_companies]
+
+            searched_companies.update(companies_to_process)
+            
+            # Phase 2: Process companies in parallel
+            batch_success_count = 0
+            with ThreadPoolExecutor(max_workers=self.args.workers, thread_name_prefix='LeadGen') as executor:
+                future_to_company = {executor.submit(self._process_single_company, c): c for c in companies_to_process}
+                for future in as_completed(future_to_company):
+                    company_name = future_to_company[future]
+                    try:
+                        is_success = future.result()
+                        if is_success:
+                            batch_success_count += 1
+                            logging.info(f"Successfully processed lead for: {company_name}")
+                        else:
+                            logging.info(f"Failed to process lead for: {company_name}")
+                    except Exception as e:
+                        logging.error(f"Task for {company_name} generated an exception: {e}", exc_info=True)
+
+            if batch_success_count == 0:
+                current_attempt += 1
+            else:
+                current_attempt = 0 # Reset safety break if we are making progress
+
+            successful_leads_count += batch_success_count
+
+        logging.info(f"Workflow finished. Successfully generated {successful_leads_count} / {target_lead_count} targeted leads.")
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Generates leads and saves them to a local CSV file.")
-    # --- FIX: Corrected 'add-argument' typo ---
+    parser = argparse.ArgumentParser(description="Generates high-quality leads and saves them to a local CSV file.")
     parser.add_argument('--location', type=str, required=True, help="Target location for leads.")
     parser.add_argument('--sector', type=str, required=True, help="Industry sector for leads.")
-    parser.add_argument('--num_companies', type=int, default=10, help="Total number of new companies to generate.")
+    parser.add_argument('--num_companies', type=int, default=10, help="Total number of SUCCESSFUL leads to generate.")
     parser.add_argument('--workers', type=int, default=5, help="Number of parallel threads for processing.")
     args = parser.parse_args()
 
