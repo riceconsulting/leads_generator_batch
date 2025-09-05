@@ -1,3 +1,6 @@
+# File: leads_generator.py
+# --- REVISED TO USE THE LATEST FLASH MODEL ---
+
 import os
 import time
 import argparse
@@ -26,7 +29,6 @@ class Config:
 
 class GeminiAPIKeyManager:
     """Thread-safe management of a pool of Gemini API keys."""
-    # This class remains the same as the previous version.
     def __init__(self, api_keys_str):
         self._keys = [key.strip() for key in api_keys_str.split(',')]
         self._key_pool = cycle(self._keys)
@@ -76,7 +78,6 @@ class CSVDataManager:
                     ])
 
     def get_existing_company_names(self):
-        """Fetches all company names from the CSV for de-duplication."""
         with self.csv_lock:
             if not self.output_file.exists(): return set()
             try:
@@ -88,10 +89,9 @@ class CSVDataManager:
                 return set()
 
     def write_lead_data(self, company_name, lead_data):
-        """Writes a single generated lead to the CSV file in a thread-safe manner."""
         timestamp = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')
         status = 'Processed' if lead_data.get('status') == 'success' else 'Failed'
-        get = lambda key: lead_data.get(key) or "" # Helper to return '' if data is None
+        get = lambda key: lead_data.get(key) or ""
 
         with self.csv_lock:
             try:
@@ -114,38 +114,38 @@ class LeadGenerationOrchestrator:
         self.args = args
 
     def _call_gemini_api(self, prompt):
-        # This method remains the same as the previous version.
         max_retries_per_key = 3
         while True:
             api_key = self.key_manager.get_key()
             if not api_key: return None, "All API keys are exhausted."
             genai.configure(api_key=api_key)
-            model = genai.GenerativeModel('gemini-pro')
+            
+            # --- THIS IS THE REVISED LINE ---
+            # Changed 'gemini-pro' to 'gemini-1.5-flash-latest' to align with modern, available models.
+            model = genai.GenerativeModel('gemini-1.5-flash-latest')
+            
             for attempt in range(max_retries_per_key):
                 try:
-                    return model.generate_content(prompt).text, None
+                    response = model.generate_content(prompt)
+                    return response.text, None
                 except ResourceExhausted:
+                    logging.warning(f"Rate limit hit. Retrying in {2**attempt}s...")
                     time.sleep(2 ** attempt)
                 except Exception as e:
+                    logging.error(f"An unexpected API error occurred: {e}")
                     return None, str(e)
             if not self.key_manager.rotate_key():
                 return None, "All API keys exhausted after retries."
 
     def _generate_company_list_in_batches(self):
-        """Phase 1: Generate a de-duplicated list of companies in batches of 10."""
         logging.info("Phase 1: Generating company list in batches...")
         all_new_companies = set()
-        
-        # Determine how many batches we need to run
-        num_batches = (self.args.num_companies + 9) // 10 # Ceiling division
+        num_batches = (self.args.num_companies + 9) // 10
 
         for i in range(num_batches):
-            # Get all companies we've already found in the CSV and in this run
             existing_companies = self.data_manager.get_existing_company_names().union(all_new_companies)
-            
             logging.info(f"Batch {i+1}/{num_batches}: Generating 10 new companies...")
-            
-            avoid_list_str = ", ".join(list(existing_companies)[-200:]) # Use a recent subset to keep prompt size manageable
+            avoid_list_str = ", ".join(list(existing_companies)[-200:])
             
             prompt = (
                 f"Act as a Market Research Analyst. Your task is to generate a list of 10 high-quality company names "
@@ -159,18 +159,15 @@ class LeadGenerationOrchestrator:
                 logging.error(f"Could not generate company list for batch {i+1}: {error}")
                 continue
             
-            # Add new, unique companies to our set
             batch_companies = {name.strip() for name in response_text.split(',') if name.strip()}
             newly_found = batch_companies - existing_companies
             all_new_companies.update(newly_found)
             logging.info(f"Found {len(newly_found)} unique companies in this batch.")
-            time.sleep(2) # Pause between batch generations
+            time.sleep(2)
 
         return list(all_new_companies)[:self.args.num_companies]
 
     def _process_single_company(self, company_name):
-        """Phase 2: Generate detailed lead info for a single company."""
-        # This method is largely the same, but its prompt is now a separate method
         prompt = self._generate_detailed_prompt(company_name)
         raw_response, error = self._call_gemini_api(prompt)
         lead_data = {}
@@ -198,14 +195,39 @@ class LeadGenerationOrchestrator:
         return company_name
     
     def _generate_detailed_prompt(self, company_name):
-        # The detailed prompt is unchanged.
         return f"""
-        Act as an Expert Business Development Researcher...
-        ...
-        """ # Omitted for brevity, same as previous version
+        Act as an Expert Business Development Researcher. Your task is to find the most relevant decision-maker for a potential business partnership for the company specified below.
+
+        ### COMPANY INFORMATION ###
+        - Company Name: "{company_name}"
+        - Geographic Focus: "{self.args.location}"
+        - Industry Sector Focus: "{self.args.sector}"
+
+        ### INSTRUCTIONS ###
+        1. Find the best contact person (e.g., Manager, Director, VP in Marketing, Sales, or Business Development).
+        2. Provide contact details, a company summary, and a reason for lead quality.
+        3. Respond ONLY with a single, valid JSON object. Do not include any extra text or markdown.
+
+        ### JSON OUTPUT FORMAT EXAMPLE ###
+        {{
+          "contact_person": {{
+            "name": "Jane Doe",
+            "title": "Director of Marketing"
+          }},
+          "contact_details": {{
+            "email": "jane.doe@examplecorp.com",
+            "phone_number": "+1-555-123-4567",
+            "linkedin_url": "https://linkedin.com/in/janedoe"
+          }},
+          "company_summary": "Example Corp is a leading provider of cloud solutions.",
+          "reason_for_quality": "As Director of Marketing, Jane is the key decision-maker for new tools."
+        }}
+
+        ### IMPORTANT ###
+        If you cannot find specific information (like email or phone), use `null` as the value for that field. Do not invent information.
+        """
 
     def run(self):
-        """Executes the entire lead generation workflow."""
         companies_to_process = self._generate_company_list_in_batches()
         if not companies_to_process:
             logging.warning("No new companies were generated to process.")
