@@ -1,6 +1,6 @@
 # GitHub Actions Workflow for the Advanced Lead Generator
 # This version gracefully handles missing Google Sheets secrets, falling back to CSV mode.
-name: Run Advanced Lead Generator
+name: Run Lead Generator
 
 # This workflow can be triggered manually from the Actions tab in GitHub
 on:
