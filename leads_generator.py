@@ -1,6 +1,3 @@
-# File: leads_generator.py
-# --- REVISED WITH REGENERATIVE FAILURE LOOP, NEW CSV FORMAT, AND ENHANCED PROMPTS ---
-
 import os
 import time
 import argparse
@@ -76,7 +73,6 @@ class CSVDataManager:
                 return
             with open(self.output_file, 'w', newline='', encoding='utf-8') as f:
                 writer = csv.writer(f)
-                # --- FIX: Revised headers as requested ---
                 writer.writerow([
                     'CompanyName', 'ContactName', 'ContactTitle', 'Email', 'PhoneNumber',
                     'AlternativeContactName', 'AlternativeContactTitle', 'AlternativeEmail', 'AlternativePhoneNumber',
@@ -98,12 +94,10 @@ class CSVDataManager:
         """Writes a single successful lead to the CSV."""
         timestamp = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')
         get = lambda key: lead_data.get(key) or ""
-
         with self.csv_lock:
             try:
                 with open(self.output_file, 'a', newline='', encoding='utf-8') as f:
                     writer = csv.writer(f)
-                    # --- FIX: Writing data in the new column order ---
                     writer.writerow([
                         company_name, get('contact_name'), get('contact_title'), get('email'), get('phone_number'),
                         get('alt_contact_name'), get('alt_contact_title'), get('alt_email'), get('alt_phone_number'),
@@ -127,9 +121,12 @@ class LeadGenerationOrchestrator:
             api_key = self.key_manager.get_key()
             if not api_key: return None, "All API keys are exhausted."
             genai.configure(api_key=api_key)
+            
+            # --- FIX: Using 'gemini-2.5-flash' as ordered, with Google Search tool for quality ---
             model = genai.GenerativeModel(
                 model_name='gemini-2.5-flash'
             )
+            
             for attempt in range(max_retries_per_key):
                 try:
                     response = model.generate_content(prompt)
@@ -149,6 +146,7 @@ class LeadGenerationOrchestrator:
         if not text:
             return None
         match = re.search(r'```(?:json)?\s*(\{[\s\S]*?\})\s*```', text)
+        text_to_parse = ""
         if match:
             text_to_parse = match.group(1)
         else:
@@ -165,19 +163,21 @@ class LeadGenerationOrchestrator:
         return None
 
     def _generate_detailed_prompt(self, company_name):
-        """Creates an enhanced, robust prompt for finding multiple contacts."""
+        """Creates an enhanced prompt that is less aggressive about rejecting leads."""
         return f"""
         **MISSION:** You are an elite AI investigator and data enrichment specialist. Your target is the company "{company_name}" within the "{self.args.sector}" sector in or near "{self.args.location}".
 
-        **PRIMARY OBJECTIVE (NON-NEGOTIABLE):** Your highest priority is to acquire direct contact information for key decision-makers. Success is defined as finding AT LEAST ONE direct email OR direct phone number.
+        **PRIMARY OBJECTIVE (HIGHEST PRIORITY):** Your highest priority is to acquire DIRECT contact information for key decision-makers.
+        - **SUCCESS CRITERIA:** Find at least ONE direct email (e.g., firstname.lastname@company.com) OR one direct mobile phone number.
+        - **SECONDARY OBJECTIVE:** If no direct contacts can be found after a thorough search, your goal is to find the best possible GENERAL contact details (e.g., `sales@`, `marketing@`, main office line).
 
         **EXECUTION PROTOCOL:**
         1.  **IDENTIFY CONTACTS:** Use Google Search to find up to two key decision-makers. Prioritize roles like C-Level (CEO, CTO), VP, Director, or Head of Department (Sales, Marketing, Operations).
         2.  **GATHER INTEL FOR EACH CONTACT:** For each person you identify, find their `name`, `title`, direct `email`, and direct `phone` number.
-        3.  **EXCLUDE LOW-VALUE DATA:** Do NOT include generic emails (`info@`, `support@`, `jobs@`) or general company hotlines unless NO direct information can be found.
+        3.  **EXCLUDE LOW-VALUE DATA:** Do NOT include generic emails like `jobs@`, `careers@`, `support@` unless they are the *only* contacts available.
 
         **FINAL REPORTING & QUALITY CONTROL:**
-        1.  **INVALIDATION RULE:** If the company is not operational OR you fail the PRIMARY OBJECTIVE (cannot find a single direct email or phone number), your entire response MUST be ONLY: `{{ "status": "failed", "reason": "Could not find any direct contact information." }}`.
+        1.  **INVALIDATION RULE:** You must only return `status: "failed"` if the company is non-operational OR you can find absolutely NO contact information of any kind (neither direct nor general).
         2.  **OUTPUT FORMAT:** Your entire response MUST be a single, raw JSON object. Do not use markdown.
 
         **JSON STRUCTURE EXAMPLE (SUCCESS):**
@@ -191,10 +191,10 @@ class LeadGenerationOrchestrator:
                     "phone": "+6281234567890"
                 }},
                 {{
-                    "name": "Ani Wijaya",
-                    "title": "Head of Sales",
-                    "email": "ani.wijaya@examplecorp.com",
-                    "phone": null
+                    "name": "Sales Department",
+                    "title": "General Sales Inquiry",
+                    "email": "sales.surabaya@examplecorp.com",
+                    "phone": "+62315551234"
                 }}
             ]
         }}
@@ -211,17 +211,17 @@ class LeadGenerationOrchestrator:
 
         parsed_json = self._parse_json_from_response(raw_response)
 
-        if not parsed_json or parsed_json.get('status') == 'failed' or not parsed_json.get('contacts'):
-            reason = parsed_json.get('reason', 'Invalid or failed response from AI.')
+        # --- FIX: Less aggressive rejection logic ---
+        if not parsed_json or parsed_json.get('status') == 'failed':
+            reason = parsed_json.get('reason', 'AI returned a failure status or invalid format.')
             logging.warning(f"Lead for '{company_name}' failed. Reason: {reason}")
             return False
 
-        contacts = parsed_json.get('contacts', [])
-        if not isinstance(contacts, list) or len(contacts) == 0:
-            logging.warning(f"Lead for '{company_name}' failed. Reason: No contacts found in the response.")
+        contacts = parsed_json.get('contacts')
+        if not isinstance(contacts, list) or not contacts:
+            logging.warning(f"Lead for '{company_name}' failed. Reason: Response contained no 'contacts' array.")
             return False
 
-        # Map the successful JSON response to our flat CSV structure
         primary_contact = contacts[0]
         secondary_contact = contacts[1] if len(contacts) > 1 else {}
         
@@ -242,14 +242,12 @@ class LeadGenerationOrchestrator:
         """Generates a list of new company candidates, avoiding exclusions."""
         logging.info(f"Attempting to generate {count_needed} new company candidates...")
         avoid_list_str = ", ".join(list(exclusion_list)[-200:])
-        
         prompt = (
             f"Act as a Market Research Analyst. Generate a list of {count_needed} high-quality company names "
             f"in the '{self.args.sector}' sector, near '{self.args.location}'. "
             "Provide output as a single line of comma-separated values.\n"
             f"IMPORTANT: Do NOT include any of these company names: {avoid_list_str}"
         )
-        
         response_text, error = self._call_gemini_api(prompt)
         if error:
             logging.error(f"Could not generate company list: {error}")
@@ -261,50 +259,45 @@ class LeadGenerationOrchestrator:
         return newly_found
 
     def run(self):
-        """Executes the regenerative lead generation workflow."""
+        """Executes the regenerative lead generation workflow with a failure limit."""
         target_lead_count = self.args.num_companies
         successful_leads_count = 0
         searched_companies = self.data_manager.get_existing_company_names()
-        max_attempts = 3 # Safety break to prevent infinite loops
-        current_attempt = 0
+        # --- FIX: Loop limit as requested ---
+        consecutive_generation_failures = 0
+        MAX_CONSECUTIVE_FAILURES = 3
 
-        while successful_leads_count < target_lead_count and current_attempt < max_attempts:
+        while successful_leads_count < target_lead_count:
             needed_count = target_lead_count - successful_leads_count
             logging.info(f"Goal: {target_lead_count} leads. Current: {successful_leads_count}. Need {needed_count} more.")
 
-            # Phase 1: Generate new, unique company candidates
             companies_to_process = self._generate_company_candidates(needed_count, searched_companies)
             
             if not companies_to_process:
-                logging.warning("Could not generate any new company candidates in this attempt.")
-                current_attempt += 1
+                consecutive_generation_failures += 1
+                logging.warning(f"Could not generate new candidates. Failure {consecutive_generation_failures}/{MAX_CONSECUTIVE_FAILURES}.")
+                if consecutive_generation_failures >= MAX_CONSECUTIVE_FAILURES:
+                    logging.error("Exceeded max consecutive failures to generate new companies. Halting.")
+                    break
                 continue
-
+            
+            consecutive_generation_failures = 0 # Reset on success
             searched_companies.update(companies_to_process)
             
-            # Phase 2: Process companies in parallel
             batch_success_count = 0
             with ThreadPoolExecutor(max_workers=self.args.workers, thread_name_prefix='LeadGen') as executor:
                 future_to_company = {executor.submit(self._process_single_company, c): c for c in companies_to_process}
                 for future in as_completed(future_to_company):
                     company_name = future_to_company[future]
                     try:
-                        is_success = future.result()
-                        if is_success:
+                        if future.result():
                             batch_success_count += 1
                             logging.info(f"Successfully processed lead for: {company_name}")
-                        else:
-                            logging.info(f"Failed to process lead for: {company_name}")
                     except Exception as e:
                         logging.error(f"Task for {company_name} generated an exception: {e}", exc_info=True)
-
-            if batch_success_count == 0:
-                current_attempt += 1
-            else:
-                current_attempt = 0 # Reset safety break if we are making progress
-
+            
             successful_leads_count += batch_success_count
-
+        
         logging.info(f"Workflow finished. Successfully generated {successful_leads_count} / {target_lead_count} targeted leads.")
 
 
