@@ -1,6 +1,3 @@
-# File: leads_generator.py
-# --- REVISED TO USE THE LATEST FLASH MODEL ---
-
 import os
 import time
 import argparse
@@ -8,6 +5,7 @@ import logging
 import json
 import csv
 import threading
+from datetime import datetime
 from itertools import cycle
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
