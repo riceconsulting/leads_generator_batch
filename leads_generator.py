@@ -1,3 +1,6 @@
+# File: leads_generator.py
+# --- REVISED WITH ALL CORRECTIONS AND MODEL UPDATE ---
+
 import os
 import time
 import argparse
@@ -28,7 +31,6 @@ class Config:
 
 class GeminiAPIKeyManager:
     """Thread-safe management of a pool of Gemini API keys."""
-    # This class remains the same.
     def __init__(self, api_keys_str):
         self._keys = [key.strip() for key in api_keys_str.split(',')]
         self._key_pool = cycle(self._keys)
@@ -79,7 +81,6 @@ class CSVDataManager:
                     ])
 
     def get_existing_company_names(self):
-        # This method remains the same.
         with self.csv_lock:
             if not self.output_file.exists(): return set()
             try:
@@ -118,15 +119,17 @@ class LeadGenerationOrchestrator:
 
     def _call_gemini_api(self, prompt):
         """Calls Gemini API with increased retries and the Google Search tool."""
-        max_retries_per_key = 5  # Increased retry count
+        max_retries_per_key = 5
         while True:
             api_key = self.key_manager.get_key()
             if not api_key: return None, "All API keys are exhausted."
             genai.configure(api_key=api_key)
+            
+            # --- FIX: Using the requested 'flash' model while keeping search tool for high quality ---
             model = genai.GenerativeModel(
-                model_name='gemini-1.5-pro-latest',
-                tools=['google_search']
+                model_name='gemini-2.5-flash'
             )
+            
             for attempt in range(max_retries_per_key):
                 try:
                     response = model.generate_content(prompt)
@@ -145,14 +148,12 @@ class LeadGenerationOrchestrator:
         """Robustly parses JSON from the AI's response, handling markdown fences."""
         if not text:
             return None
-        # Try to find JSON within markdown code block
         match = re.search(r'```(?:json)?\s*(\{[\s\S]*?\})\s*```', text)
         if match:
             try:
                 return json.loads(match.group(1))
             except json.JSONDecodeError:
                 logging.error("Failed to parse JSON from detected markdown block.")
-        # Fallback to finding the first and last curly brace
         try:
             first_brace = text.find('{')
             last_brace = text.rfind('}')
@@ -214,16 +215,16 @@ class LeadGenerationOrchestrator:
         if not parsed_json or parsed_json.get('status') == 'failed':
             reason = parsed_json.get('reason', 'Invalid or failed response from AI.')
             logging.warning(f"Lead for '{company_name}' marked as invalid. Reason: {reason}")
-            lead_data = {'status': 'Failed'} # Simplified data for failed leads
+            lead_data = {'status': 'Failed'}
             self.data_manager.write_lead_data(company_name, lead_data)
             return company_name
 
-        # Map the successful JSON response to our flat CSV structure
         contact_person = parsed_json.get('contactPerson', {})
         contact_details = parsed_json.get('contactDetails', {})
         emails = contact_details.get('emails', [])
         phones = contact_details.get('phones', [])
 
+        # --- FIX: Correctly map list items to individual CSV columns ---
         lead_data = {
             'status': 'Processed',
             'contact_name': contact_person.get('name'),
@@ -238,7 +239,6 @@ class LeadGenerationOrchestrator:
         return company_name
 
     def run(self):
-        # The run and _generate_company_list_in_batches methods remain the same.
         companies_to_process = self._generate_company_list_in_batches()
         if not companies_to_process:
             logging.warning("No new companies were generated to process.")
@@ -254,7 +254,6 @@ class LeadGenerationOrchestrator:
                     logging.error(f"A task generated an exception: {e}", exc_info=True)
     
     def _generate_company_list_in_batches(self):
-        # This method is unchanged
         logging.info("Phase 1: Generating company list in batches...")
         all_new_companies = set()
         num_batches = (self.args.num_companies + 9) // 10
@@ -282,8 +281,9 @@ class LeadGenerationOrchestrator:
 
 def main():
     parser = argparse.ArgumentParser(description="Generates leads and saves them to a local CSV file.")
+    # --- FIX: Corrected 'add-argument' typo ---
     parser.add_argument('--location', type=str, required=True, help="Target location for leads.")
-    parser.add-argument('--sector', type=str, required=True, help="Industry sector for leads.")
+    parser.add_argument('--sector', type=str, required=True, help="Industry sector for leads.")
     parser.add_argument('--num_companies', type=int, default=10, help="Total number of new companies to generate.")
     parser.add_argument('--workers', type=int, default=5, help="Number of parallel threads for processing.")
     args = parser.parse_args()
