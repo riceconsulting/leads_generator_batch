@@ -1,7 +1,6 @@
 # GitHub Actions Workflow for generating new leads and saving them to a local CSV.
 name: 1 - Generate Leads to CSV
 
-# This workflow can be triggered manually from the Actions tab in GitHub.
 on:
   workflow_dispatch:
     inputs:
@@ -16,7 +15,7 @@ on:
       num_companies:
         description: 'Number of new companies to generate'
         required: true
-        default: '30'
+        default: '15'
       workers:
         description: 'Number of parallel workers'
         required: true
@@ -26,11 +25,14 @@ jobs:
   generate-leads:
     runs-on: ubuntu-latest
     
+    # --- THIS IS THE FIX FOR THE "PERMISSION DENIED" ERROR ---
+    permissions:
+      contents: write
+    
     steps:
       - name: 1. Checkout Repository
         uses: actions/checkout@v4
         with:
-          # We need to fetch all history to be able to push back changes.
           fetch-depth: 0
 
       - name: 2. Set up Python 3.11
@@ -45,7 +47,6 @@ jobs:
 
       - name: 4. Create .env file from GitHub Secrets
         run: |
-          # This workflow only needs the Gemini API keys.
           echo "GEMINI_API_KEYS=${{ secrets.GEMINI_API_KEYS }}" >> .env
 
       - name: 5. Run the Lead Generation Script
@@ -64,10 +65,8 @@ jobs:
 
       - name: 7. Commit and Push Updated CSV
         run: |
-          # Add the results file to the staging area.
           git add lead_results/lead_results.csv
           
-          # Check if there are any changes to commit.
           if git diff-index --quiet HEAD --; then
             echo "No new leads were added to the CSV. Working tree clean."
           else
