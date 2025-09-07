@@ -1,5 +1,5 @@
 # File: leads_generator.py
-# --- REVISED WITH EFFICIENCY IMPROVEMENTS AND ENHANCED LOGIC ---
+# --- REVISED WITH CONTACT FILTERING, GENERAL INQUIRIES PROMPT, AND INDUSTRY COLUMN ---
 
 import os
 import time
@@ -76,28 +76,25 @@ class CSVDataManager:
                 return
             with open(self.output_file, 'w', newline='', encoding='utf-8') as f:
                 writer = csv.writer(f)
+                # --- REVISION: Added 'Industry' column to the CSV header ---
                 writer.writerow([
                     'CompanyName', 'Industry', 'ContactName', 'ContactTitle', 'Email', 'PhoneNumber', 'Timestamp'
                 ])
 
     def get_existing_company_names(self):
-        """
-        Reads all company names from the CSV once.
-        Using a set inherently ensures the list is distinct.
-        """
+        """Reads all distinct company names from the CSV once for efficiency."""
         with self.csv_lock:
             if not self.output_file.exists(): return set()
             try:
                 with open(self.output_file, 'r', encoding='utf-8') as f:
                     reader = csv.DictReader(f)
-                    # A set comprehension automatically handles distinctness.
                     return {row['CompanyName'] for row in reader if 'CompanyName' in row}
             except Exception as e:
                 logging.error(f"Could not read existing company names from CSV: {e}")
                 return set()
 
     def write_lead_data(self, company_name, industry, contacts):
-        """Writes multiple rows to the CSV, one for each contact found."""
+        """Writes multiple rows to the CSV, one for each valid contact found."""
         timestamp = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')
         with self.csv_lock:
             try:
@@ -105,9 +102,12 @@ class CSVDataManager:
                     writer = csv.writer(f)
                     for contact in contacts:
                         writer.writerow([
-                            company_name, industry,
-                            contact.get('name') or "", contact.get('title') or "",
-                            contact.get('email') or "", contact.get('phone') or "",
+                            company_name,
+                            industry,
+                            contact.get('name') or "",
+                            contact.get('title') or "",
+                            contact.get('email') or "",
+                            contact.get('phone') or "",
                             timestamp
                         ])
             except Exception as e:
@@ -162,20 +162,19 @@ class LeadGenerationOrchestrator:
         return None
 
     def _generate_detailed_prompt(self, company_name):
-        """Creates an enhanced prompt to find company industry and up to 5 contacts."""
+        """Creates an enhanced prompt to find company industry and various contacts."""
         return f"""
         **MISSION:** You are an elite AI investigator and data enrichment specialist. Your target is the company "{company_name}" located in or near "{self.args.location}".
 
-        **PRIMARY OBJECTIVE:** Your highest priority is to acquire contact information for key decision-makers.
+        **PRIMARY OBJECTIVE:** Your highest priority is to acquire contact information.
 
         **EXECUTION PROTOCOL:**
         1.  **IDENTIFY INDUSTRY:** First, determine the specific industry of the company (e.g., "Food & Beverage Manufacturing", "Software Development", "Logistics").
         2.  **IDENTIFY CONTACTS:** Use Google Search to find up to 5 contacts. Order them by quality:
-            - **Highest Quality:** Direct contacts (C-Level, VP, Director, Head of Department) with direct, professional emails/phones.
-            - **Medium Quality:** Specific department contacts (e.g., Sales Department with `sales@` email).
-            - **Lower Quality:** General company contact information (e.g., `info@` email, main office number).
-        3.  **GATHER INTEL FOR EACH CONTACT:** For each contact, find their `name`, `title`, `email`, and `phone` number. Prioritize official corporate contact details.
-        4.  **EXCLUDE LOW-VALUE DATA:** Do not include personal (non-corporate) emails or phone numbers.
+            - **Highest Priority:** Direct contacts (C-Level, VP, Director, Head of Department) with direct, professional emails/phones.
+            - **Secondary Priority:** If direct contacts are not available, find specific department contacts (e.g., Sales Department with `sales@` email, Marketing Department).
+            - **Fallback:** If no specific contacts are found, find General Inquiry contacts or a main office phone number.
+        3.  **GATHER INTEL FOR EACH CONTACT:** For each contact, find their `name`, `title`, `email`, and `phone` number. Use `null` if a piece of information is missing.
 
         **FINAL REPORTING & QUALITY CONTROL:**
         1.  **INVALIDATION RULE:** Only return `status: "failed"` if the company is non-operational OR you can find absolutely NO contact information of any kind.
@@ -188,7 +187,7 @@ class LeadGenerationOrchestrator:
             "contacts": [
                 {{ "name": "Budi Santoso", "title": "Marketing Director", "email": "budi.s@examplecorp.com", "phone": "+6281234567890" }},
                 {{ "name": "Sales Department", "title": "General Sales", "email": "sales@examplecorp.com", "phone": null }},
-                {{ "name": "Main Office", "title": "Reception", "email": "info@examplecorp.com", "phone": "+62315551234" }}
+                {{ "name": "Main Office", "title": "Reception", "email": null, "phone": "+62315551234" }}
             ]
         }}
         """
@@ -211,10 +210,19 @@ class LeadGenerationOrchestrator:
         industry = parsed_json.get('industry', 'N/A')
 
         if not isinstance(contacts, list) or not contacts:
-            logging.warning(f"Lead for '{company_name}' failed. Reason: Response contained no valid contacts.")
+            logging.warning(f"Lead for '{company_name}' failed. Reason: Response contained no 'contacts' array.")
             return False
 
-        self.data_manager.write_lead_data(company_name, industry, contacts)
+        # --- REVISION: Filter out contacts that have neither an email nor a phone number ---
+        valid_contacts = [
+            c for c in contacts if c.get('email') or c.get('phone')
+        ]
+
+        if not valid_contacts:
+            logging.warning(f"Lead for '{company_name}' failed. Reason: No contacts with email or phone were found after filtering.")
+            return False
+
+        self.data_manager.write_lead_data(company_name, industry, valid_contacts)
         return True
 
     def _generate_company_candidates(self, count_needed, exclusion_list):
@@ -245,7 +253,7 @@ class LeadGenerationOrchestrator:
         """Executes the regenerative lead generation workflow with efficiency improvements."""
         target_company_count = self.args.num_companies
         
-        # --- REVISION: Read existing companies ONCE for efficiency ---
+        # --- IMPROVEMENT: Read existing companies ONCE for efficiency ---
         searched_companies = self.data_manager.get_existing_company_names()
         successful_company_count = 0
         
@@ -256,7 +264,6 @@ class LeadGenerationOrchestrator:
             needed_count = target_company_count - successful_company_count
             logging.info(f"Goal: {target_company_count} successful companies. Current: {successful_company_count}. Need {needed_count} more.")
 
-            # Phase 1: Generate new, unique company candidates
             companies_to_process = self._generate_company_candidates(needed_count, searched_companies)
             
             if not companies_to_process:
@@ -268,10 +275,8 @@ class LeadGenerationOrchestrator:
                 continue
             
             consecutive_generation_failures = 0
-            # --- REVISION: Update the in-memory set to avoid re-reading the file ---
             searched_companies.update(companies_to_process)
             
-            # Phase 2: Process companies in parallel
             batch_success_count = 0
             with ThreadPoolExecutor(max_workers=self.args.workers, thread_name_prefix='LeadGen') as executor:
                 future_to_company = {executor.submit(self._process_single_company, c): c for c in companies_to_process}
