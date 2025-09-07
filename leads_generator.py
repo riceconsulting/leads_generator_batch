@@ -1,5 +1,5 @@
 # File: leads_generator.py
-# --- REVISED TO ADD 'COMPANYWEBSITE' COLUMN ---
+# --- REVISED WITH ENHANCED COMPANY LIST GENERATION PROMPT ---
 
 import os
 import time
@@ -76,7 +76,6 @@ class CSVDataManager:
                 return
             with open(self.output_file, 'w', newline='', encoding='utf-8') as f:
                 writer = csv.writer(f)
-                # --- REVISION: Added 'CompanyWebsite' column to the CSV header ---
                 writer.writerow([
                     'CompanyName', 'Industry', 'CompanyWebsite', 'ContactName', 'ContactTitle', 'Email', 'PhoneNumber', 'Timestamp'
                 ])
@@ -101,15 +100,10 @@ class CSVDataManager:
                 with open(self.output_file, 'a', newline='', encoding='utf-8') as f:
                     writer = csv.writer(f)
                     for contact in contacts:
-                        # --- REVISION: Added 'website' to the row data ---
                         writer.writerow([
-                            company_name,
-                            industry,
-                            website,
-                            contact.get('name') or "",
-                            contact.get('title') or "",
-                            contact.get('email') or "",
-                            contact.get('phone') or "",
+                            company_name, industry, website,
+                            contact.get('name') or "", contact.get('title') or "",
+                            contact.get('email') or "", contact.get('phone') or "",
                             timestamp
                         ])
             except Exception as e:
@@ -210,7 +204,6 @@ class LeadGenerationOrchestrator:
 
         contacts = parsed_json.get('contacts')
         industry = parsed_json.get('industry', 'N/A')
-        # --- REVISION: Extract the new website field ---
         website = parsed_json.get('officialWebsite', 'N/A')
 
         if not isinstance(contacts, list) or not contacts:
@@ -225,7 +218,6 @@ class LeadGenerationOrchestrator:
             logging.warning(f"Lead for '{company_name}' failed. Reason: No contacts with email or phone were found after filtering.")
             return False
 
-        # --- REVISION: Pass the new website variable to the data writer ---
         self.data_manager.write_lead_data(company_name, industry, website, valid_contacts)
         return True
 
@@ -236,11 +228,15 @@ class LeadGenerationOrchestrator:
         
         sector_prompt = f"in the '{self.args.sector}' sector" if self.args.sector else "from a variety of promising sectors"
 
+        # --- REVISION: Enhanced prompt for higher quality and mixed company sizes ---
         prompt = (
-            f"Act as a Market Research Analyst. Generate a list of {count_needed} high-quality company names "
-            f"{sector_prompt}, near '{self.args.location}'. Include promising smaller businesses, not just large corporations. "
-            "Provide output as a single line of comma-separated values.\n"
-            f"IMPORTANT: Do NOT include any of these company names: {avoid_list_str}"
+            f"Act as a Market Research Analyst specializing in B2B lead generation. Generate a list of {count_needed} reputable and operational company names "
+            f"{sector_prompt}, near '{self.args.location}'.\n"
+            "INSTRUCTIONS:\n"
+            "- The list should contain a diverse mix of company sizes: include well-known medium and large corporations as well as promising small businesses.\n"
+            "- CRITICAL: Prioritize companies with a verifiable online presence, such as an official website or a significant listing in a major business directory.\n"
+            "- Provide the output as a single, raw line of comma-separated values.\n"
+            f"- IMPORTANT: Do NOT include any of the following company names in your output: {avoid_list_str}"
         )
         
         response_text, error = self._call_gemini_api(prompt)
@@ -271,8 +267,8 @@ class LeadGenerationOrchestrator:
             
             if not companies_to_process:
                 consecutive_generation_failures += 1
-                logging.warning(f"Could not generate new candidates. Failure {consecutive_generation_failures}/{MAX_CONsecutive_FAILURES}.")
-                if consecutive_generation_failures >= MAX_CONsecutive_FAILURES:
+                logging.warning(f"Could not generate new candidates. Failure {consecutive_generation_failures}/{MAX_CONSECUTIVE_FAILURES}.")
+                if consecutive_generation_failures >= MAX_CONSECUTIVE_FAILURES:
                     logging.error("Exceeded max consecutive failures to generate new companies. Halting.")
                     break
                 continue
