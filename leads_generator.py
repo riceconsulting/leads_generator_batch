@@ -1,5 +1,5 @@
 # File: leads_generator.py
-# --- REVISED WITH ENHANCED COMPANY LIST GENERATION PROMPT ---
+# --- REVISED WITH BATCHED (5) COMPANY LIST GENERATION FOR HIGHER QUALITY ---
 
 import os
 import time
@@ -158,22 +158,22 @@ class LeadGenerationOrchestrator:
         return None
 
     def _generate_detailed_prompt(self, company_name):
-        """Creates an enhanced prompt to find company industry, website, and contacts."""
+        """Creates an enhanced prompt with anti-hallucination and grounding instructions."""
         return f"""
-        **MISSION:** You are an elite AI investigator and data enrichment specialist. Your target is the company "{company_name}" located in or near "{self.args.location}".
+        **MISSION:** You are an elite AI investigator and data enrichment specialist whose work is fact-checked for accuracy. Your target is the company "{company_name}" located in or near "{self.args.location}".
 
-        **PRIMARY OBJECTIVE:** Your highest priority is to acquire contact information.
+        **CORE PRINCIPLE: ACCURACY OVER QUANTITY.** It is better to return fewer, verified contacts than to invent information. If a piece of data (like an email or phone number) cannot be found in your search results, you MUST use `null`.
 
         **EXECUTION PROTOCOL:**
-        1.  **IDENTIFY COMPANY DETAILS:** First, determine the company's official website and specific industry (e.g., "Food & Beverage Manufacturing").
-        2.  **IDENTIFY CONTACTS:** Use Google Search to find up to 5 contacts. Order them by quality:
+        1.  **VERIFY COMPANY DETAILS:** First, use your search tool to verify the company's official website and determine its specific industry (e.g., "Food & Beverage Manufacturing").
+        2.  **IDENTIFY AND EXTRACT CONTACTS:** Find up to 5 contacts from your search results. Order them by quality:
             - **Highest Priority:** Direct contacts (C-Level, VP, Director, Head of Department) with direct, professional emails/phones.
-            - **Secondary Priority:** If direct contacts are not available, find specific department contacts (e.g., Sales Department).
-            - **Fallback:** If no specific contacts are found, find General Inquiry contacts or a main office phone number.
-        3.  **GATHER INTEL FOR EACH CONTACT:** For each contact, find their `name`, `title`, `email`, and `phone` number. Use `null` if a piece of information is missing.
+            - **Secondary Priority:** Specific department contacts (e.g., Sales Department).
+            - **Fallback:** General Inquiry contacts or a main office phone number.
+        3.  **GATHER INTEL FOR EACH CONTACT:** For each contact found in your search results, extract their `name`, `title`, `email`, and `phone` number. Prioritize official corporate contact details.
 
         **FINAL REPORTING & QUALITY CONTROL:**
-        1.  **INVALIDATION RULE:** Only return `status: "failed"` if the company is non-operational OR you can find absolutely NO contact information of any kind.
+        1.  **INVALIDATION RULE:** Only return `status: "failed"` if the company is non-operational OR you can find absolutely NO verifiable contact information.
         2.  **OUTPUT FORMAT:** Your entire response MUST be a single, raw JSON object. Do not use markdown.
 
         **JSON STRUCTURE EXAMPLE (SUCCESS):**
@@ -221,36 +221,38 @@ class LeadGenerationOrchestrator:
         self.data_manager.write_lead_data(company_name, industry, website, valid_contacts)
         return True
 
-    def _generate_company_candidates(self, count_needed, exclusion_list):
-        """Generates a list of new company candidates, avoiding exclusions."""
-        logging.info(f"Attempting to generate {count_needed} new company candidates...")
+    def _generate_company_candidate_batch(self, exclusion_list):
+        """Generates a high-quality, verifiable batch of 5 new company candidates."""
+        # --- REVISION: This function now generates a fixed batch of 5 ---
+        BATCH_SIZE = 5
+        logging.info(f"Attempting to generate a new batch of {BATCH_SIZE} company candidates...")
         avoid_list_str = ", ".join(list(exclusion_list)[-200:])
         
         sector_prompt = f"in the '{self.args.sector}' sector" if self.args.sector else "from a variety of promising sectors"
 
-        # --- REVISION: Enhanced prompt for higher quality and mixed company sizes ---
         prompt = (
-            f"Act as a Market Research Analyst specializing in B2B lead generation. Generate a list of {count_needed} reputable and operational company names "
-            f"{sector_prompt}, near '{self.args.location}'.\n"
-            "INSTRUCTIONS:\n"
-            "- The list should contain a diverse mix of company sizes: include well-known medium and large corporations as well as promising small businesses.\n"
-            "- CRITICAL: Prioritize companies with a verifiable online presence, such as an official website or a significant listing in a major business directory.\n"
-            "- Provide the output as a single, raw line of comma-separated values.\n"
-            f"- IMPORTANT: Do NOT include any of the following company names in your output: {avoid_list_str}"
+            f'Act as a meticulous Business Intelligence Analyst. Generate a list of {BATCH_SIZE} company names for B2B lead generation '
+            f'{sector_prompt}, near "{self.args.location}".\n'
+            "**CORE DIRECTIVES:**\n"
+            "1. **VERIFIABILITY IS MANDATORY:** Each company MUST be real and operational. Ground your suggestions in verifiable data from your search results. Prioritize companies with an official website or a major business directory listing.\n"
+            "2. **DIVERSE SIZES:** The list must include a diverse mix of company sizes, from promising small businesses to well-known medium and large corporations.\n"
+            "3. **NO HALLUCINATION:** Do NOT invent company names.\n"
+            "**OUTPUT FORMAT:** Provide the output as a single, raw line of comma-separated values.\n"
+            f"**EXCLUSION LIST:** Do NOT include any of these company names: {avoid_list_str}"
         )
         
         response_text, error = self._call_gemini_api(prompt)
         if error:
-            logging.error(f"Could not generate company list: {error}")
+            logging.error(f"Could not generate company list batch: {error}")
             return []
         
         batch_companies = {name.strip() for name in response_text.split(',') if name.strip()}
         newly_found = list(batch_companies - exclusion_list)
-        logging.info(f"Generated {len(newly_found)} unique company candidates.")
+        logging.info(f"Generated {len(newly_found)} unique company candidates in this batch.")
         return newly_found
 
     def run(self):
-        """Executes the regenerative lead generation workflow with efficiency improvements."""
+        """Executes the regenerative lead generation workflow with batched candidate generation."""
         target_company_count = self.args.num_companies
         
         searched_companies = self.data_manager.get_existing_company_names()
@@ -263,18 +265,29 @@ class LeadGenerationOrchestrator:
             needed_count = target_company_count - successful_company_count
             logging.info(f"Goal: {target_company_count} successful companies. Current: {successful_company_count}. Need {needed_count} more.")
 
-            companies_to_process = self._generate_company_candidates(needed_count, searched_companies)
+            # --- REVISION: Generate company candidates in batches of 5 ---
+            candidates_for_this_run = []
+            while len(candidates_for_this_run) < needed_count:
+                new_batch = self._generate_company_candidate_batch(searched_companies)
+                if not new_batch:
+                    # If a batch fails, we count it as a failure and break the inner loop
+                    consecutive_generation_failures += 1
+                    logging.warning(f"A batch generation failed. Failure count: {consecutive_generation_failures}/{MAX_CONSECUTIVE_FAILURES}.")
+                    break
+                
+                candidates_for_this_run.extend(new_batch)
+                searched_companies.update(new_batch)
             
-            if not companies_to_process:
-                consecutive_generation_failures += 1
-                logging.warning(f"Could not generate new candidates. Failure {consecutive_generation_failures}/{MAX_CONSECUTIVE_FAILURES}.")
+            if not candidates_for_this_run:
                 if consecutive_generation_failures >= MAX_CONSECUTIVE_FAILURES:
                     logging.error("Exceeded max consecutive failures to generate new companies. Halting.")
                     break
                 continue
             
             consecutive_generation_failures = 0
-            searched_companies.update(companies_to_process)
+            
+            # Ensure we only process the number of companies we currently need
+            companies_to_process = candidates_for_this_run[:needed_count]
             
             batch_success_count = 0
             with ThreadPoolExecutor(max_workers=self.args.workers, thread_name_prefix='LeadGen') as executor:
