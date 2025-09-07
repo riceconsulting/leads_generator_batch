@@ -1,6 +1,4 @@
 CompanyName,Industry,CompanyWebsite,ContactName,ContactTitle,Email,PhoneNumber,Timestamp
-SurgaWorks,Video Game Development,https://surgaworks.com,Agoes Suhardie,"Founder, Game Developer",agoes.suhardie@gmail.com,,2025-09-07 19:34:20 UTC
-SurgaWorks,Video Game Development,https://surgaworks.com,General Inquiry,Company Contact,info@surgaworks.com,+6282257276088,2025-09-07 19:34:20 UTC
 PT. Adiguna Kemasan Lestari,Plastic Packaging Manufacturing,https://adigunakemasanlestari.com,Adiguna Kemasan Lestari Main Office,General Contact,info@adigunakemasanlestari.com,+6231-8798999,2025-09-07 19:34:33 UTC
 PT Akses Digital Solusi,IT Services & Consulting,https://aksedigital.com,General Inquiry,General Contact,info@aksedigital.com,,2025-09-07 19:32:19 UTC
 PT Akses Digital Solusi,IT Services & Consulting,https://aksedigital.com,Main Office,Main Phone Number,,+62318273770,2025-09-07 19:32:19 UTC
@@ -22,14 +20,6 @@ PT Surya Kencana Manufaktur,Food & Beverage Manufacturing,https://suryakencanama
 PT Surya Kencana Manufaktur,Food & Beverage Manufacturing,https://suryakencanamanufaktur.com,,Export Department,export@sekawan-kawan.com,,2025-09-07 19:34:46 UTC
 Mandiri E-dagang,"E-commerce Solutions, Web Development, Digital Marketing",https://www.mandiriedagang.co.id/,General Inquiry,Office Contact,info@edagangmandiri.com,+62317322842,2025-09-07 19:33:34 UTC
 Mandiri E-dagang,"E-commerce Solutions, Web Development, Digital Marketing",https://www.mandiriedagang.co.id/,WhatsApp Contact,Customer Service/Sales,,+6282230000700,2025-09-07 19:33:34 UTC
-EduSakti,Education Technology,https://edusakti.id,Support Department,General Inquiry,support@edusakti.id,,2025-09-07 19:33:57 UTC
-EduSakti,Education Technology,https://edusakti.id,Main Office,General Inquiry,,+6281252033330,2025-09-07 19:33:57 UTC
-Dinamika Rantai Pasok,Logistics & Supply Chain Management,https://ptdrp.co.id,,General Inquiry,info@ptdrp.co.id,+62313570622,2025-09-07 19:34:04 UTC
-Dinamika Rantai Pasok,Logistics & Supply Chain Management,https://ptdrp.co.id,,Jakarta Office,,+622162306788,2025-09-07 19:34:04 UTC
-Dinamika Rantai Pasok,Logistics & Supply Chain Management,https://ptdrp.co.id,,Semarang Office,,+622486044733,2025-09-07 19:34:04 UTC
-Dinamika Rantai Pasok,Logistics & Supply Chain Management,https://ptdrp.co.id,,Sidoarjo Office,,+62318963505,2025-09-07 19:34:04 UTC
-PT. Smart Kota Digital Indonesia,Digital Marketing & Software Development,https://www.smartkotadigital.co.id,General Inquiry,General Inquiry,info@smartkotadigital.co.id,,2025-09-07 19:34:09 UTC
-PT. Smart Kota Digital Indonesia,Digital Marketing & Software Development,https://www.smartkotadigital.co.id,Main Office,Main Office,,+6282229990806,2025-09-07 19:34:09 UTC
 PT Energi Terbarukan Timur,Renewable Energy Solutions,http://www.ettindonesia.com,General Inquiry,General Information,info@ettindonesia.com,,2025-09-07 19:34:19 UTC
 PT Energi Terbarukan Timur,Renewable Energy Solutions,http://www.ettindonesia.com,Main Office,Company Main Line,,+62318676880,2025-09-07 19:34:19 UTC
 PT Cloud Cerdas Nusantara,Information Technology & Services,https://cloudcerdasnusantara.com,,General Inquiry,info@cloudcerdasnusantara.com,+623130005572,2025-09-07 19:34:47 UTC
@@ -46,8 +36,6 @@ PT Cipta Karya Visual,"Advertising, Branding, and Creative Agency",https://www.c
 PT Cipta Karya Visual,"Advertising, Branding, and Creative Agency",https://www.ciptakaryavisual.com,Main Office,Landline Phone,,+62 31 5937812,2025-09-07 19:35:24 UTC
 PT Data Raya Analitika,IT Services and IT Consulting,https://dataraya.id,General Inquiry,General Information,info@dataraya.id,,2025-09-07 19:32:35 UTC
 PT Data Raya Analitika,IT Services and IT Consulting,https://dataraya.id,Main Office,General Information,,+628121650880,2025-09-07 19:32:35 UTC
-PT Eko Daya Solusi,Water & Waste Management Solutions,https://www.ekodayasolusi.com,,General Inquiry,info@ekodayasolusi.com,+62317322300,2025-09-07 19:32:56 UTC
-PT Eko Daya Solusi,Water & Waste Management Solutions,https://www.ekodayasolusi.com,,Sales Department,info@ekodayasolusi.com,+62317322300,2025-09-07 19:32:56 UTC
 PT Pangan Sejahtera Mandiri,Animal Feed Manufacturing (Aquaculture Feed),https://pangansejahtera.com,,General Inquiry,info@pangansejahtera.com,,2025-09-07 19:33:11 UTC
 PT Pangan Sejahtera Mandiri,Animal Feed Manufacturing (Aquaculture Feed),https://pangansejahtera.com,,Main Office,,+62313930100,2025-09-07 19:33:11 UTC
 PT Trans Nusantara Ekspres,Logistics & Freight Forwarding,https://www.transnusantaraekspres.com,Trans Nusantara Ekspres - Surabaya Head Office,General Inquiry,info@transnusantaraekspres.com,+62315010289,2025-09-07 19:33:16 UTC
@@ -123,3 +111,4 @@ PT Citra Van Titipan Kilat (TIKI),Logistics and Express Delivery,https://tiki.id
 PT Citra Van Titipan Kilat (TIKI),Logistics and Express Delivery,https://tiki.id,Customer Service,Customer Service,,+621500125,2025-09-07 19:56:05 UTC
 PT Citra Van Titipan Kilat (TIKI),Logistics and Express Delivery,https://tiki.id,TIKI Surabaya Margorejo Branch,Branch Office,,+62318438888,2025-09-07 19:56:05 UTC
 PT Citra Van Titipan Kilat (TIKI),Logistics and Express Delivery,https://tiki.id,TIKI Surabaya Rungkut Branch,Branch Office,,+62318709555,2025-09-07 19:56:05 UTC
+
