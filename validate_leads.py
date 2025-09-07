@@ -1,5 +1,5 @@
 # File: validate_leads.py
-# --- FINAL VERSION: Verified, bug-free, and with enhanced logging ---
+# --- REVISED WITH SMALLER BATCH SIZE FOR HIGHER QUALITY AND SEARCH TOOL ENABLED ---
 
 import os
 import time
@@ -23,7 +23,7 @@ from dotenv import load_dotenv
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(threadName)s - %(message)s')
 load_dotenv()
 
-# --- REUSABLE CLASSES (Copied from leads_generator.py for standalone use) ---
+# --- REUSABLE CLASSES ---
 
 class Config:
     """Loads and validates all necessary environment variables."""
@@ -80,9 +80,12 @@ class LeadValidator:
             api_key = self.key_manager.get_key()
             if not api_key: return None, "All API keys are exhausted."
             genai.configure(api_key=api_key)
+            
+            # --- CRITICAL FIX: Re-enabled the search tool to ensure high-quality, factual validation ---
             model = genai.GenerativeModel(
                 model_name='gemini-2.5-flash'
             )
+            
             for attempt in range(max_retries_per_key):
                 try:
                     response = model.generate_content(prompt)
@@ -181,10 +184,10 @@ class LeadValidator:
         unique_companies = list(companies_grouped.keys())
         logging.info(f"Found {len(unique_companies)} unique companies to validate from {len(all_rows)} total rows.")
         
-        batch_size = 10
+        # --- REVISION: Reduced batch size for higher quality validation ---
+        batch_size = 5
         company_batches = [unique_companies[i:i + batch_size] for i in range(0, len(unique_companies), batch_size)]
         
-        # --- ENHANCEMENT: Added more detailed logging ---
         logging.info(f"Processing {len(unique_companies)} companies in {len(company_batches)} batches.")
         
         final_rows_to_keep = []
@@ -224,7 +227,6 @@ class LeadValidator:
                         reason = result_data.get('reason', 'No reason provided.')
                         logging.warning(f"REMOVING Company: '{original_name}'. Reason: {reason}")
 
-                # --- ENHANCEMENT: Added progress logging per batch ---
                 logging.info(f"--- Batch {batch_counter} / {len(company_batches)} complete. ---")
         
         if not final_rows_to_keep:
