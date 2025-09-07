@@ -9,9 +9,10 @@ on:
         required: true
         default: 'Surabaya, Indonesia'
       sector:
-        description: 'Target Sector (e.g., "Technology")'
-        required: true
-        default: 'Manufacturing'
+        # --- REVISION: Sector is now optional ---
+        description: 'Optional: Target Sector (e.g., "Technology"). Leave empty to search all sectors.'
+        required: false
+        default: ''
       num_companies:
         description: 'Number of new companies to generate'
         required: true
@@ -19,13 +20,12 @@ on:
       workers:
         description: 'Number of parallel workers'
         required: true
-        default: '5'
+        default: '2'
 
 jobs:
   generate-leads:
     runs-on: ubuntu-latest
     
-    # --- THIS IS THE FIX FOR THE "PERMISSION DENIED" ERROR ---
     permissions:
       contents: write
     
@@ -52,11 +52,21 @@ jobs:
       - name: 5. Run the Lead Generation Script
         id: generate
         run: |
-          python leads_generator.py \
-            --location "${{ github.event.inputs.location }}" \
-            --sector "${{ github.event.inputs.sector }}" \
+          # --- REVISION: Conditionally build the command ---
+          # Start with the base command, including required arguments.
+          CMD="python leads_generator.py \
+            --location \"${{ github.event.inputs.location }}\" \
             --num_companies ${{ github.event.inputs.num_companies }} \
-            --workers ${{ github.event.inputs.workers }}
+            --workers ${{ github.event.inputs.workers }}"
+          
+          # If the sector input is not empty, add the --sector argument to the command.
+          if [[ -n "${{ github.event.inputs.sector }}" ]]; then
+            CMD="$CMD --sector \"${{ github.event.inputs.sector }}\""
+          fi
+          
+          # Print the final command for debugging purposes and then execute it.
+          echo "Executing: $CMD"
+          eval $CMD
 
       - name: 6. Configure Git for Commit
         run: |
